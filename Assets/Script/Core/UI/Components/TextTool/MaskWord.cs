@@ -52,6 +52,10 @@ public class MaskWord : MonoBehaviour {
         if (SentiWords == null)
             return;
 
+        if (!LanguageManager.CurrentLanguageIsChinese())
+        {
+            return;
+        }
 
         if (string.IsNullOrEmpty(t))
         {
@@ -64,7 +68,7 @@ public class MaskWord : MonoBehaviour {
                 if (!ssr.Equals(""))
                 {
                     needReInput = true;
-                    //Debug.Log("包含敏感词汇:" + ssr + ",需要进行替换");
+                    Debug.Log("包含敏感词汇:" + ssr + ",需要进行替换");
                     //string stt = inputField.text;
                     //int length = ssr.ToCharArray().Length;
                     //string s = "";

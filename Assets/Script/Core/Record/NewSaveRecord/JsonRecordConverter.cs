@@ -1,8 +1,8 @@
-﻿using HDJ.Framework.Utils;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using UnityEngine;
 
 public class JsonRecordConverter : IRecordConverter
 {
@@ -23,7 +23,10 @@ public class JsonRecordConverter : IRecordConverter
 
     public T String2Object<T>(string content)
     {
-        return JsonUtils.FromJson<T>(content);
+        T t = default(T);
+        JsonUtils.TryFromJson(out t, content);
+        //Debug.Log(state+ " old:" + content + "\n" + "new:" + JsonUtils.ToJson(t)+"\n def:"+JsonUtils.ToJson(default(T)));
+        return t;
     }
 }
 

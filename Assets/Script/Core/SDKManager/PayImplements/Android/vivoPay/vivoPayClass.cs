@@ -11,7 +11,8 @@ public class vivoPayClass : PayInterface
     public string mchID;
     public string appSecret;
     string goodsID;
-    string mch_orderID;
+    float price;
+    //string mch_orderID;
     GameObject androidListener;
     public override List<RuntimePlatform> GetPlatform()
     {
@@ -23,13 +24,17 @@ public class vivoPayClass : PayInterface
     }
     public override void Init()
     {
-        Debug.LogWarning("=========vivoPayClass Init===========");
-        //SDKManagerNew.OnPayCallBack += SetPayResult;
-        GlobalEvent.AddTypeEvent<PrePay2Client>(OnPrePay);
+        base.Init();
+        if (SDKManager.IncludeThePayPlatform(StoreName.VIVO))
+        {
+            Debug.LogWarning("=========vivoPayClass Init===========");
+            //SDKManagerNew.OnPayCallBack += SetPayResult;
+            GlobalEvent.AddTypeEvent<PrePay2Client>(OnPrePay);
 
-        appid = SDKManager.GetProperties("vivo","AppID", appid);
-        mchID = SDKManager.GetProperties("vivo","MchID", mchID);
-        appSecret = SDKManager.GetProperties("vivo", "AppSecret", appSecret);
+            appid = SDKManager.GetProperties("vivo", "AppID", appid);
+            mchID = SDKManager.GetProperties("vivo", "MchID", mchID);
+            appSecret = SDKManager.GetProperties("vivo", "AppSecret", appSecret);
+        }
     }
 
     /// <summary>
@@ -52,8 +57,16 @@ public class vivoPayClass : PayInterface
         onPayInfo.goodsId = e.goodsID;
         onPayInfo.storeName = StoreName.VIVO;
         onPayInfo.receipt = e.mch_orderID;
+        onPayInfo.price = price;
         PayReSend.Instance.AddPrePayID(onPayInfo);
-        IndentListener(e.goodsID,e.mch_orderID, e.prepay_id);
+        //IndentListener(e.goodsID,e.mch_orderID, e.prepay_id, onPayInfo.price);
+
+
+        PayInfo payInfo = new PayInfo(e.goodsID, GetGoodsInfo(e.goodsID).localizedTitle, "", FrameWork.SDKManager.GoodsType.NORMAL, e.mch_orderID, price, GetGoodsInfo(goodsID).isoCurrencyCode, GetUserID(), e.storeName.ToString());
+        payInfo.prepay_id = e.prepay_id;
+        SDKManagerNew.Pay(payInfo);
+
+
     }
 
     /// <summary>
@@ -63,27 +76,26 @@ public class vivoPayClass : PayInterface
     /// <param name="tag"></param>
     /// <param name="goodsType"></param>
     /// <param name="orderID"></param>
-    public override void Pay(string goodsID, string tag, FrameWork.SDKManager.GoodsType goodsType = FrameWork.SDKManager.GoodsType.NORMAL, string orderID = null)
+    public override void Pay(PayInfo payInfo)
     {
-        this.goodsID = goodsID;
-        
+        this.goodsID = payInfo.goodsID;
+        price = payInfo.price;
         Debug.LogWarning("send vivopay----message-----" + goodsID);
         //给服务器发消息1
         PrePay2Service.SendPrePayMsg(StoreName.VIVO, goodsID);
     }
 
 
-    /// <summary>
-    /// 消息1 的监听， 获得订单信息，然后调支付sdk
-    /// </summary>
-    private void IndentListener(string goodID,string mch_orderID,string prepay_id)
-    {
-        this.mch_orderID = mch_orderID;
+    ///// <summary>
+    ///// 消息1 的监听， 获得订单信息，然后调支付sdk
+    ///// </summary>
+    //private void IndentListener(string goodID,string mch_orderID,string prepay_id,float price)
+    //{
+    //    this.mch_orderID = mch_orderID;
 
-        string tag = mch_orderID;
-        PayInfo payInfo = new PayInfo(goodID, "", tag, FrameWork.SDKManager.GoodsType.NORMAL, prepay_id, 0, GetGoodsInfo(goodsID).isoCurrencyCode);
-        SDKManagerNew.Pay(StoreName.VIVO.ToString(), payInfo);
-    }
+    //    PayInfo payInfo = new PayInfo(goodID, GetGoodsInfo(goodID).localizedTitle, prepay_id, FrameWork.SDKManager.GoodsType.NORMAL, mch_orderID, price, GetGoodsInfo(goodsID).isoCurrencyCode,GetUserID());
+    //    SDKManagerNew.Pay(StoreName.VIVO.ToString(), payInfo);
+    //}
 
     /// <summary>
     /// 从sdk返回支付结果
@@ -107,7 +119,7 @@ public class vivoPayClass : PayInterface
         OnPayInfo payInfo = new OnPayInfo();
         payInfo.isSuccess = info.isSuccess;
         payInfo.goodsId = goodsID;
-        payInfo.orderID = mch_orderID;
+        payInfo.orderID = info.orderID;
         payInfo.goodsType = GetGoodType(goodsID);
         payInfo.storeName = StoreName.VIVO;
 
@@ -116,12 +128,12 @@ public class vivoPayClass : PayInterface
 
         Debug.Log("SetPayResult " + payInfo.price + " goodsID " + goodsID);
 
-        payInfo.receipt = mch_orderID;
+        payInfo.receipt = info.orderID;
         
         PayCallBack(payInfo);
     }
 
-    public override void ConfirmPay(string goodsID, string mch_orderID)
+    public override void ConfirmPay(string goodsID, string mch_orderID, string StoreName)
     {
         PayReSend.Instance.ClearPrePayID(mch_orderID);
     }

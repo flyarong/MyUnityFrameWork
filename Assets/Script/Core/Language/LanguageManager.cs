@@ -7,28 +7,39 @@ using System;
 public class LanguageManager
 {
     public const string c_configFileName     = "LanguageConfig";
-    public const string c_defaultModuleKey   = "default";
+    public const string c_defaultModuleKey = "default";
 
     public const string c_DataFilePrefix = "LangData_";
     public const string c_mainKey  = "key";
     public const string c_valueKey = "value";
+    /// <summary>
+    /// 当前语言
+    /// </summary>
+    public static SystemLanguage CurrentLanguage
+    {
+        get
+        {
+            Init();
+            return s_currentLanguage;
+        }
+    }
 
-    static public SystemLanguage s_currentLanguage = SystemLanguage.ChineseSimplified; //当前语言
-    static public Dictionary<string,string> s_languageDataDict = new Dictionary<string, string>();//所有语言数据
+    public static CallBack<SystemLanguage> OnChangeLanguage;
+
+    static private SystemLanguage s_currentLanguage = SystemLanguage.ChineseSimplified; //当前语言
+    static private Dictionary<string,string> s_languageDataDict = new Dictionary<string, string>();//所有语言数据
 
     private static LanguageSettingConfig config;
     static private bool isInit = false;
 
     public static bool IsInit
     {
-        get { return LanguageManager.isInit; }
+        get { return isInit; }
         set { isInit = value; }
     }
 
     public static void Init()
     {
-        //Debug.Log("1 当前语言: " + Application.systemLanguage + " isInit " + isInit);
-
         if (!isInit)
         {
             isInit = true;
@@ -36,12 +47,44 @@ public class LanguageManager
             {
                 config = LanguageDataUtils.LoadRuntimeConfig();
             }
-            SetLanguage(ApplicationManager.Langguage);
+            if (config == null)
+                return;
+            s_currentLanguage = SetConfig();
+            Debug.Log("使用语言：" + s_currentLanguage);
         }
     }
 
+    private static SystemLanguage SetConfig()
+    {
+        SystemLanguage systemLanguage = Application.systemLanguage;
+        if(systemLanguage== SystemLanguage.Chinese)
+        {
+            systemLanguage = SystemLanguage.ChineseSimplified;
+        }
+        Debug.Log("config.useSystemLanguage:" + config.useSystemLanguage+ " config.defaultLanguage:"+ config.defaultLanguage);
+        if (config.useSystemLanguage)
+        {
+           
+            if (config.gameExistLanguages.Contains(systemLanguage))
+            {
+                return systemLanguage;
+            }
+            else
+            {
+                if (config.gameExistLanguages.Contains(SystemLanguage.English))
+                {
+                    return SystemLanguage.English;
+                }
+            }
+        }
+
+        return config.defaultLanguage;
+    }
+
     public static void SetLanguage(SystemLanguage lang)
-    {  
+    {
+        Init();
+
         SystemLanguage oldLan = s_currentLanguage;
         if (config == null)
             return;
@@ -50,40 +93,43 @@ public class LanguageManager
 
         if (config.gameExistLanguages.Contains(lang))
         {
+            Debug.Log("切换语言：" + lang);
             s_currentLanguage = lang;
         }
         else
         {
-            //Debug.Log("当前语言不存在 " + lang);
-
-            s_currentLanguage = config.defaultLanguage;
+            Debug.LogError("当前语言不存在 " + lang);
+            return;
         }
         if (oldLan != s_currentLanguage)
         {
             s_languageDataDict.Clear();
+
+            if (OnChangeLanguage != null)
+            {
+                OnChangeLanguage(s_currentLanguage);
+            }
         }
-
-        GlobalEvent.DispatchEvent(LanguageEventEnum.LanguageChange, lang);
     }
 
-    /// <summary>
-    /// 兼容旧版本代码，不再建议使用
-    /// </summary>
+    ///// <summary>
+    ///// 兼容旧版本代码，不再建议使用
+    ///// </summary>
+    //[Obsolete]
+    //public static string GetContent(string contentID, List<object> contentParams)
+    //{
+    //    return GetContent(c_defaultModuleKey, contentID, contentParams.ToArray());
+    //}
+
+    ///// <summary>
+    ///// 兼容旧版本代码，不再建议使用
+    ///// </summary>
+    //[Obsolete]
+    //public static string GetContent(string contentID, params object[] contentParams)
+    //{
+    //    return GetContent(c_defaultModuleKey, contentID, contentParams);
+    //}
     [Obsolete]
-    public static string GetContent(string contentID, List<object> contentParams)
-    {
-        return GetContent(c_defaultModuleKey, contentID, contentParams.ToArray());
-    }
-
-    /// <summary>
-    /// 兼容旧版本代码，不再建议使用
-    /// </summary>
-    [Obsolete]
-    public static string GetContent(string contentID, params object[] contentParams)
-    {
-        return GetContent(c_defaultModuleKey, contentID, contentParams);
-    }
-
     public static string GetContent(string moduleName,string contentID, List<object> contentParams)
     {
         return GetContent(moduleName, contentID, contentParams.ToArray());
@@ -111,18 +157,31 @@ public class LanguageManager
                 Debug.LogError("LanguageManager => Error : Format is error :"+fullKeyName);
                 return false;
             }
-            string key = fullKeyName.Substring(indexEnd + 1);
+            //string key = fullKeyName.Substring(indexEnd + 1);
             string fullFileName = fullKeyName.Remove(indexEnd);
 
             DataTable data = LoadDataTable(s_currentLanguage, fullFileName);
 
             foreach (var item in data.TableIDs)
             {
-                s_languageDataDict.Add(fullFileName + "/" + item, data[item].GetString(c_valueKey));
+                try
+                {
+                    if(!s_languageDataDict.ContainsKey(fullFileName + "/" + item))
+                    {
+                        s_languageDataDict.Add(fullFileName + "/" + item, data[item].GetString(c_valueKey));
+                    }
+
+                }
+                catch (Exception e)
+                {
+
+                    Debug.LogError("Find:"+ fullKeyName + "\n ContainsFullKeyName Error (" + fullFileName + "/" + item + ") -> (" + data[item].GetString(c_valueKey) +")\n"+e);
+                }
             }
             return s_languageDataDict.ContainsKey(fullKeyName);
         }
     }
+
     /// <summary>
     /// moduleName_key ： MiniGame/title_0
     /// </summary>
@@ -132,32 +191,48 @@ public class LanguageManager
     public static string GetContentByKey(string fullKeyName, params object[] contentParams)
     {
         Init();
-
+       
         string content = null;
-
-        if (ContainsFullKeyName(fullKeyName))
+        StringBuilder stringBuilder = new StringBuilder();
+        try
         {
-            content = s_languageDataDict[fullKeyName];
-        }
-        else
-        {
-            Debug.LogError("LanguageManager => Error : no find key :" + fullKeyName);
-            return "";
-        }
-        if (contentParams != null && contentParams.Length > 0)
-        {
-            for (int i = 0; i < contentParams.Length; i++)
+            if (ContainsFullKeyName(fullKeyName))
             {
-                string replaceTmp = "{" + i + "}";
-                if (contentParams[i] == null)
-                    continue;
-                content = content.Replace(replaceTmp, contentParams[i].ToString());
+                content = s_languageDataDict[fullKeyName];
+            }
+            else
+            {
+                Debug.LogError("LanguageManager => Error : no find key :" + fullKeyName);
+                return "";
+            }
+           
+            stringBuilder.Append(content);
+            if (contentParams != null && contentParams.Length > 0)
+            {
+                for (int i = 0; i < contentParams.Length; i++)
+                {
+                    object pars = contentParams[i];
+                    if (pars == null)
+                        continue;
+                    string replaceTmp = "{" + i + "}";
+                    stringBuilder.Replace(replaceTmp, pars.ToString());
+                    // content = content.Replace(replaceTmp, pars.ToString());
+                }
+            }
+            if (ApplicationManager.Instance != null && ApplicationManager.Instance.showLanguageValue && ApplicationManager.Instance.m_AppMode == AppMode.Developing)
+            {
+                stringBuilder.Insert(0, "[");
+                stringBuilder.Insert(stringBuilder.Length - 1, "]");
             }
         }
-        if (ApplicationManager.Instance != null && ApplicationManager.Instance.showLanguageValue && ApplicationManager.Instance.m_AppMode == AppMode.Developing)
-            content = "[" + content + "]";
+        catch (Exception e)
+        {
+            Debug.LogError("多语言获取错误!" + fullKeyName + "\n" + e);
+            return null;
+        }
+       
 
-        return content;
+        return stringBuilder.ToString();
     }
     private static Dictionary<string, int> loadTextFileTimesDic = new Dictionary<string, int>();
     private static DataTable LoadDataTable(SystemLanguage language, string fullFileName)
@@ -186,13 +261,18 @@ public class LanguageManager
             return LanguageDataUtils.LoadFileData(language, fullFileName);
         }
     }
+    [Obsolete]
     public static string GetContent(string moduleName, string contentID, params object[] contentParams)
     {
         string fullkey = moduleName.Replace('_', '/') + "/" + contentID;
         return GetContentByKey(fullkey,contentParams);
     }
-    
-
+    /// <summary>
+    /// 获得多语言保存的文件名
+    /// </summary>
+    /// <param name="langeuageName"></param>
+    /// <param name="fullkeyFileName"></param>
+    /// <returns></returns>
     public static string GetLanguageDataName(SystemLanguage langeuageName, string fullkeyFileName)
     {
         string modelName = fullkeyFileName.Replace('/', '_');
@@ -210,9 +290,12 @@ public class LanguageManager
         }
         loadTextFileTimesDic.Clear();
     }
+
+    //当前语言是否是汉语
+    public static bool CurrentLanguageIsChinese()
+    {
+        bool isChinese = LanguageManager.CurrentLanguage == SystemLanguage.ChineseSimplified || LanguageManager.CurrentLanguage == SystemLanguage.ChineseTraditional || LanguageManager.CurrentLanguage == SystemLanguage.Chinese;
+        return isChinese;
+    }
 }
 
-public enum LanguageEventEnum
-{
-    LanguageChange,
-}

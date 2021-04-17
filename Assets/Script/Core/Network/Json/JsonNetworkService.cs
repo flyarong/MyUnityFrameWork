@@ -27,13 +27,21 @@ public class JsonNetworkService : INetworkInterface
         EncryptionService.Init();
 
         m_msgCode = 0;
+        m_buffer = new StringBuilder();
+
         base.Connect();
     }
 
+    Queue<string> mesQueue = new Queue<string>(); //消息队列
+
     public override void SpiltMessage(byte[] data, ref int offset, int length)
     {
-        DealMessage(Encoding.UTF8.GetString(data, offset, length));
-        offset = 0;
+        lock(mesQueue)
+        {
+            mesQueue.Enqueue(Encoding.UTF8.GetString(data, offset, length));
+            DealMessage(mesQueue.Dequeue());
+            offset = 0;
+        }
     }
 
     //发送消息
@@ -47,17 +55,13 @@ public class JsonNetworkService : INetworkInterface
             }
 
             string mes = Json.Serialize(data);
-            mes = mes.Replace(c_endChar.ToString(), c_endCharReplaceString);
+            //mes = mes.Replace(c_endChar.ToString(), c_endCharReplaceString);
 
-            //加密
-            if ( MessageType != HeartBeatBase.c_HeartBeatMT && EncryptionService.IsSecret)
-            {
-                mes = EncryptionService.Encrypt(mes);
-            }
+            SendMessage(MessageType, mes);
 
-            byte[] bytes = Encoding.UTF8.GetBytes(mes + c_endChar);
+            //byte[] bytes = Encoding.UTF8.GetBytes(mes + c_endChar);
 
-            m_socketService.Send(bytes);
+            //m_socketService.Send(bytes);
         }
         catch (Exception e)
         {
@@ -70,6 +74,24 @@ public class JsonNetworkService : INetworkInterface
         try
         {
             content = content.Replace(c_endChar.ToString(), c_endCharReplaceString);
+
+            try
+            {
+                if (msgCompress != null)
+                    content = msgCompress.CompressString(content);
+            }
+            catch (Exception e)
+            {
+                Debug.LogError(e);
+            }
+           
+
+            //加密
+            if (MessageType != HeartBeatBase.c_HeartBeatMT && EncryptionService.IsSecret)
+            {
+                content = EncryptionService.Encrypt(content);
+            }
+            //Debug.Log("Send Msg:" + content);
             byte[] bytes = Encoding.UTF8.GetBytes(content + c_endChar);
 
             m_socketService.Send(bytes);
@@ -83,15 +105,16 @@ public class JsonNetworkService : INetworkInterface
     StringBuilder m_buffer = new StringBuilder();
     public void DealMessage(string s)
     {
-        bool isEnd = false;
-
-        if(s.Substring(s.Length-1,1) == c_endChar.ToString())
-        { 
-            isEnd = true;
-        }
-
         lock(m_buffer)
         {
+            //Debug.Log("DealMessage s ->" + s);i
+
+            bool isEnd = false;
+            if (s.Substring(s.Length - 1, 1) == c_endChar.ToString())
+            {
+                isEnd = true;
+            }
+
             m_buffer.Append(s);
 
             string buffer = m_buffer.ToString();
@@ -123,10 +146,25 @@ public class JsonNetworkService : INetworkInterface
 
     public void CallBack(string s)
     {
+        //Debug.Log("CallBack s ->" + s);
+
         try
         {
             if(s != null && s != "")
             {
+                if (msgCompress != null)
+                {
+                    try
+                    {
+                        s = msgCompress.DecompressString(s);
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogError(e);
+                    }
+                    
+                }
+
                 //解密
                 if(EncryptionService.IsSecret)
                 {

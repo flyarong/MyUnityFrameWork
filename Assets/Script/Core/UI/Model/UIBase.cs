@@ -1,8 +1,10 @@
-﻿using UnityEngine;
+﻿
+using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
 using System;
 using UnityEngine.UI;
+using System.Reflection;
 
 public class UIBase : MonoBehaviour , UILifeCycleInterface
 {
@@ -76,6 +78,7 @@ public class UIBase : MonoBehaviour , UILifeCycleInterface
     {
         ClearGuideModel();
         RemoveAllListener();
+        CleanAnim();
         CleanItem();
         CleanModelShowCameraList();
 
@@ -169,6 +172,30 @@ public class UIBase : MonoBehaviour , UILifeCycleInterface
         bool has = false;
         has = m_objects.ContainsKey(name);
         return has;
+    }
+
+    public bool GetHasGameObject(string name)
+    {
+        if (m_objects == null)
+        {
+            CreateObjectTable();
+        }
+
+        if (m_objects.ContainsKey(name))
+        {
+            GameObject go = m_objects[name];
+
+            if (go == null)
+            {
+                return false;
+            }
+
+            return true;
+        }
+        else
+        {
+            return false;
+        }
     }
 
     public GameObject GetGameObject(string name)
@@ -660,6 +687,13 @@ public class UIBase : MonoBehaviour , UILifeCycleInterface
         m_EndDragEvents.Add(info);
     }
 
+    public void AddOnDragListener(string compName, InputEventHandle<InputUIOnDragEvent> callback, string parm = null)
+    {
+        InputEventRegisterInfo<InputUIOnDragEvent> info = InputUIEventProxy.GetOnDragListener(GetDragComp(compName), UIEventKey, compName, parm, callback);
+        info.AddListener();
+        m_DragEvents.Add(info);
+    }
+
     public void AddEventListener(Enum EventEnum, EventHandle handle)
     {
         EventHandRegisterInfo info = new EventHandRegisterInfo();
@@ -879,7 +913,6 @@ public class UIBase : MonoBehaviour , UILifeCycleInterface
         {
             GetText(TextID).text = content.Replace("\\n", "\n");
         }
-
     }
 
     public void SetImageColor(string ImageID, Color color)
@@ -913,7 +946,7 @@ public class UIBase : MonoBehaviour , UILifeCycleInterface
     /// 不再建议使用
     /// </summary>
     [Obsolete]
-    public void SetTextByLangeage(string textID, string contentID, params object[] objs)
+    public void SetTextByLanguage(string textID, string contentID, params object[] objs)
     {
         GetText(textID).text = LanguageManager.GetContent(LanguageManager.c_defaultModuleKey, contentID, objs);
     }
@@ -922,7 +955,7 @@ public class UIBase : MonoBehaviour , UILifeCycleInterface
     {
 
     }
-
+    [Obsolete]
     public void SetTextByLangeage(string textID, string moduleName, string contentID, params object[] objs)
     {
         GetText(textID).text = LanguageManager.GetContent(moduleName, contentID, objs);
@@ -995,6 +1028,12 @@ public class UIBase : MonoBehaviour , UILifeCycleInterface
 
     #region 动态加载Sprite赋值
     private Dictionary<string, int> loadSpriteNames = new Dictionary<string, int>();
+    public void SetImageSprite(string imgName, string name, bool is_nativesize = false)
+    {
+        Image img = GetImage(imgName);
+        SetImageSprite(img, name, is_nativesize);
+    }
+
     public void SetImageSprite(Image img, string name, bool is_nativesize = false)
     {
         if(ResourcesConfigManager.GetIsExitRes(name))
@@ -1160,7 +1199,7 @@ public class UIBase : MonoBehaviour , UILifeCycleInterface
         return obj;
     }
     /// <summary>
-    /// 新手引导获得动态创建Item  格式为：PetItem[0].Use（PetItem的Item上挂有UIBase脚本， [0] 该名字的第几个Item，Use：拖到PetItem上的GameObject）
+    /// 新手引导获得动态创建Item  格式为：PetItem[0].Use（PetItem的Item上挂有UIBase脚本， [0] 该名字的第几个Item，Use：拖到PetItem上的GameObject），当index小于0，则表示动态创建的列表List.Count-index(如-1：表示List.Count-1)
     /// </summary>
     /// <param name="itemName"></param>
     /// <returns></returns>
@@ -1181,54 +1220,71 @@ public class UIBase : MonoBehaviour , UILifeCycleInterface
             UIBase uIBase = null;
             firstName = strArr[0];
 
-
-            int index = int.Parse(firstName.SplitExtend("[", "]")[0]);
-            int tempIndex0 = firstName.IndexOf("[");
-            firstName = firstName.Replace(firstName.Substring(tempIndex0), "");
-            Debug.Log("UIBase : Index :" + index + "  firstName :" + firstName + " m_ChildList:"+ m_ChildList.Count);
-            int tempIndex = 0;
-            for (int i = 0; i < m_ChildList.Count; i++)
+            //寻找继承UIbase的变量
+            if (!firstName.Contains("["))
             {
-                UIBase cItem = m_ChildList[i];
-                Debug.Log("Item:" + cItem);
-                if (cItem.name == firstName)
-                {
-                    
-                    if (index == tempIndex)
-                    {
-                        uIBase = cItem;
-                        obj = uIBase.gameObject;
-                        break;
-                    }
-                    tempIndex++;
-                }
+                //FieldInfo fieldInfo = GetType().GetField(firstName, BindingFlags.Public|BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+              
+                // UIBase data=  (UIBase)fieldInfo.GetValue(this);
+                UIBase data= GetGameObject(firstName).GetComponent<UIBase>();
+                itemName = itemName.Replace(firstName + ".", "");
+                return data.GetGuideDynamicCreateItem(itemName);
             }
-
-            if (strArr.Length > 1)
+            else
             {
-                childName = strArr[1];
-                Debug.Log("childName:" + childName);
-                if (childName.Contains("["))
+
+                int index = int.Parse(firstName.SplitExtend("[", "]")[0]);
+                if (index < 0)
                 {
-                    childName = itemName.Replace(strArr[0] + ".", "");
-                    Debug.Log("childName:" + childName);
-                    obj = uIBase.GetGuideDynamicCreateItem(childName);
+                    index = m_ChildList.Count + index;
                 }
-                else
+                int tempIndex0 = firstName.IndexOf("[");
+                firstName = firstName.Replace(firstName.Substring(tempIndex0), "");
+                Debug.Log("UIBase : Index :" + index + "  firstName :" + firstName + " m_ChildList:" + m_ChildList.Count);
+                int tempIndex = 0;
+                for (int i = 0; i < m_ChildList.Count; i++)
                 {
-                  string afterNames=  itemName.Replace(strArr[0] + ".", "");
-                    strArr = afterNames.Split('.');
-                    Debug.Log("afterNames :" + afterNames + "  UIBase:" + GetType().Name);
-                    for (int i = 0; i < strArr.Length; i++)
+                    UIBase cItem = m_ChildList[i];
+                    Debug.Log("Item:" + cItem);
+                    if (cItem.name == firstName)
                     {
-                        string findName = strArr[i];
-                        obj = uIBase.GetGameObject(findName);
-                        if (i < strArr[i].Length - 1)
+
+                        if (index == tempIndex)
                         {
-                            uIBase = obj.GetComponent<UIBase>();
+                            uIBase = cItem;
+                            obj = uIBase.gameObject;
+                            break;
                         }
+                        tempIndex++;
                     }
-                       
+                }
+
+                if (strArr.Length > 1)
+                {
+                    childName = strArr[1];
+                    Debug.Log("childName:" + childName);
+                    if (childName.Contains("["))
+                    {
+                        childName = itemName.Replace(strArr[0] + ".", "");
+                        Debug.Log("childName:" + childName);
+                        obj = uIBase.GetGuideDynamicCreateItem(childName);
+                    }
+                    else
+                    {
+                        string afterNames = itemName.Replace(strArr[0] + ".", "");
+                        strArr = afterNames.Split('.');
+                        Debug.Log("afterNames :" + afterNames + "  UIBase:" + GetType().Name);
+                        for (int i = 0; i < strArr.Length; i++)
+                        {
+                            string findName = strArr[i];
+                            obj = uIBase.GetGameObject(findName);
+                            if (i < strArr[i].Length - 1)
+                            {
+                                uIBase = obj.GetComponent<UIBase>();
+                            }
+                        }
+
+                    }
                 }
             }
         }
@@ -1303,6 +1359,25 @@ public class UIBase : MonoBehaviour , UILifeCycleInterface
 
         m_GuideList.Clear();
         m_CreateCanvasDict.Clear();
+    }
+
+    #endregion
+
+    #region 动画管理
+
+    List<AnimData> animDataList = new List<AnimData>();
+
+    public void AddAnimData(AnimData animData)
+    {
+        animDataList.Add(animData);
+    }
+
+    public void CleanAnim()
+    {
+        for (int i = 0; i < animDataList.Count; i++)
+        {
+            AnimSystem.StopAnim(animDataList[i]);
+        }
     }
 
     #endregion

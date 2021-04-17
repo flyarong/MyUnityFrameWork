@@ -26,7 +26,8 @@ public class HotUpdateManager
 #if !UNITY_WEBGL
 
     static Dictionary<string, object> s_versionConfig;
-    static Dictionary<string, SingleField> s_hotUpdateConfig;
+    //static Dictionary<string, SingleField> s_hotUpdateConfig;
+    static string downLoadServicePath;
 
     static string s_versionFileDownLoadPath;
     static string s_ManifestFileDownLoadPath;
@@ -40,17 +41,19 @@ public class HotUpdateManager
     static AssetBundleManifest s_ManifestCache;
     static byte[] s_ManifestByteCache;
 
-    public static void StartHotUpdate(HotUpdateCallBack CallBack)
+    public static void StartHotUpdate(string hotUpdateURL, HotUpdateCallBack CallBack)
     {
+        downLoadServicePath = hotUpdateURL;
+
         s_UpdateCallBack = CallBack;
 
         Init();
 
-        //检查Streaming版本和Persistent版本哪一个更新
-        if (!CheckLocalVersion())
-        {
-            return;
-        }
+        ////检查Streaming版本和Persistent版本哪一个更新
+        //if (!CheckLocalVersion())
+        //{
+        //    return;
+        //}
 
         //开始热更新
         ApplicationManager.Instance.StartCoroutine(HotUpdateProgress());
@@ -65,61 +68,72 @@ public class HotUpdateManager
         yield return CheckVersion();
     }
 
-    static bool CheckLocalVersion()
+    public static bool CheckLocalVersion()
     {
         try
         {
-            if (ApplicationManager.Instance.m_useAssetsBundle)
-            {
-                string path = PathTool.GetAbsolutePath(ResLoadLocation.Streaming,c_versionFileName.ToLower());
+           
+                string StreamPath = PathTool.GetAbsolutePath(ResLoadLocation.Streaming,c_versionFileName.ToLower());
 
-#if UNITY_EDITOR 
                 //判断本地文件是否存在
-                if (!File.Exists(path))
+                if (!File.Exists(StreamPath))
                 {
                     Debug.LogError("本地 Version 文件不存在，请先创建本地文件！");
-                    UpdateDateCallBack(HotUpdateStatusEnum.UpdateFail, 1);
                     return false;
                 }
-#endif 
+            int s_bigVersion = 0;
+            int s_smallVersion = 0;
+            GetVersion(StreamPath, ref s_bigVersion, ref s_smallVersion);
 
-                AssetBundle ab = AssetBundle.LoadFromFile(path);
+            string persistentPath = PathTool.GetAssetsBundlePersistentPath() + c_versionFileName;
+            //判断沙盒路径是否存在
+            if (!File.Exists(persistentPath))
+                {
+                    Debug.Log("沙盒 Version 文件不存在！");
+                    return false;
+                }
 
-                TextAsset text = ab.LoadAsset<TextAsset>(c_versionFileName);
-                string StreamVersionContent = text.text;
+            int p_bigVersion = 0;
+            int p_smallVersion = 0;
+            GetVersion(persistentPath, ref p_bigVersion, ref p_smallVersion);
 
-                ab.Unload(true);
-                Debug.Log("Streaming版本:" + StreamVersionContent);
-                //stream版本
-                Dictionary<string, object> StreamVersion = (Dictionary<string, object>)FrameWork.Json.Deserialize(StreamVersionContent);
+                Debug.Log("largeVersionKey Streaming " + s_bigVersion + " 本地 " + p_bigVersion);
+                Debug.Log("smallVersonKey Streaming  " + s_smallVersion + " 本地 " + p_smallVersion);
 
                 //Streaming版本如果比Persistent版本还要新，则更新Persistent版本
-                if ((GetInt(StreamVersion[c_largeVersionKey]) > GetInt(s_versionConfig[c_largeVersionKey])) ||
-                    (GetInt(StreamVersion[c_smallVersonKey]) > GetInt(s_versionConfig[c_smallVersonKey]))
+                if (s_bigVersion > p_bigVersion ||
+                   (s_bigVersion == p_bigVersion&& s_smallVersion > p_smallVersion)||
+                   (s_bigVersion == p_bigVersion && s_smallVersion == p_smallVersion)
                     )
                 {
                     Debug.Log("Streaming版本比Persistent版本还要新");
-
+                    MemoryManager.FreeMemory();
                     RecordManager.CleanRecord(c_HotUpdateRecordName);
-                    Init();
                     AssetsManifestManager.LoadAssetsManifest();
                 }
                 return true;
-            }
-            else
-            {
-                Debug.Log("没有使用Bundle 无需更新");
-                UpdateDateCallBack(HotUpdateStatusEnum.NoUpdate, 0);
-                return false;
-            }
+        
         }
         catch(Exception e)
         {
             Debug.LogError(e.ToString());
-            UpdateDateCallBack(HotUpdateStatusEnum.UpdateFail, 0);
+            //UpdateDateCallBack(HotUpdateStatusEnum.UpdateFail, 0);
         }
 
         return false;
+    }
+    private static void GetVersion(string path, ref int bigVersion,ref int smallVersion)
+    {
+
+        AssetBundle ab = AssetBundle.LoadFromFile(path);
+
+        TextAsset text = ab.LoadAsset<TextAsset>(c_versionFileName);
+        string StreamVersionContent = text.text;
+        ab.Unload(true);
+
+        Dictionary<string, object> StreamVersion = (Dictionary<string, object>)FrameWork.Json.Deserialize(StreamVersionContent);
+        bigVersion=  GetInt(StreamVersion[c_largeVersionKey]);
+        smallVersion= GetInt(StreamVersion[c_smallVersonKey]);
     }
 
     public static string GetHotUpdateVersion()
@@ -161,7 +175,7 @@ public class HotUpdateManager
         www.assetBundle.Unload(true);
 
         UpdateDateCallBack(HotUpdateStatusEnum.DownLoadingVersionFile, GetHotUpdateProgress(false, false, 1));
-
+        Debug.Log("服务器版本：" + s_versionFileCache);
         Dictionary<string, object> ServiceVersion = (Dictionary<string, object>)FrameWork.Json.Deserialize(s_versionFileCache);
 
         //服务器大版本比较大，需要整包更新
@@ -323,6 +337,8 @@ public class HotUpdateManager
         //重新生成资源配置
         ResourcesConfigManager.LoadResourceConfig();
         AssetsManifestManager.LoadAssetsManifest();
+        //延迟2秒卸载Bundle缓存，防止更新界面掉图（更新时间短时，卸载过快界面会掉图）
+        //yield return new WaitForSeconds(2);
         ResourceManager.ReleaseAll(false);
         UpdateDateCallBack(HotUpdateStatusEnum.UpdateSuccess, 1);
 
@@ -332,35 +348,35 @@ public class HotUpdateManager
     static void Init()
     {
         s_versionConfig   = (Dictionary<string,object>) FrameWork.Json.Deserialize(ReadVersionContent());
-        s_hotUpdateConfig = ConfigManager.GetData(c_HotUpdateConfigName);
+        //s_hotUpdateConfig = ConfigManager.GetData(c_HotUpdateConfigName);
 
-        //获取下载地址
-        //优先从注入数据中查询
-        string downLoadServicePath = null;
-        if (ApplicationManager.AppMode == AppMode.Release)
-        {
-            if(string.IsNullOrEmpty(SDKManager.GetProperties(SDKInterfaceDefine.PropertiesKey_UpdateDownLoadPath, "")))
-            {
-                downLoadServicePath = s_hotUpdateConfig[c_downLoadPathKey].GetString();
-            }
-            else
-            {
-                downLoadServicePath = SDKManager.GetProperties(SDKInterfaceDefine.PropertiesKey_UpdateDownLoadPath, "");
-            }
-        }
-        else
-        {
-            if (string.IsNullOrEmpty(SDKManager.GetProperties(SDKInterfaceDefine.PropertiesKey_TestUpdateDownLoadPath, "")))
-            {
-                downLoadServicePath = s_hotUpdateConfig[c_testDownLoadPathKey].GetString();
-            }
-            else
-            {
-                downLoadServicePath = SDKManager.GetProperties(SDKInterfaceDefine.PropertiesKey_TestUpdateDownLoadPath, "");
-            }
+        ////获取下载地址
+        ////优先从注入数据中查询
+        //string downLoadServicePath = null;
+        //if (ApplicationManager.AppMode == AppMode.Release)
+        //{
+        //    if(string.IsNullOrEmpty(SDKManager.GetProperties(SDKInterfaceDefine.PropertiesKey_UpdateDownLoadPath, "")))
+        //    {
+        //        downLoadServicePath = s_hotUpdateConfig[c_downLoadPathKey].GetString();
+        //    }
+        //    else
+        //    {
+        //        downLoadServicePath = SDKManager.GetProperties(SDKInterfaceDefine.PropertiesKey_UpdateDownLoadPath, "");
+        //    }
+        //}
+        //else
+        //{
+        //    if (string.IsNullOrEmpty(SDKManager.GetProperties(SDKInterfaceDefine.PropertiesKey_TestUpdateDownLoadPath, "")))
+        //    {
+        //        downLoadServicePath = s_hotUpdateConfig[c_testDownLoadPathKey].GetString();
+        //    }
+        //    else
+        //    {
+        //        downLoadServicePath = SDKManager.GetProperties(SDKInterfaceDefine.PropertiesKey_TestUpdateDownLoadPath, "");
+        //    }
 
-            downLoadServicePath = s_hotUpdateConfig[c_testDownLoadPathKey].GetString();
-        }
+        //    downLoadServicePath = s_hotUpdateConfig[c_testDownLoadPathKey].GetString();
+        //}
 
         string downLoadPath = downLoadServicePath + "/" + platform + "/" + Application.version + "/";
         
@@ -422,6 +438,12 @@ public class HotUpdateManager
             Platform = "Android";
 #elif UNITY_IOS //iPhone
                 Platform = "IOS";
+#elif UNITY_STANDALONE_OSX
+             Platform = "Mac";
+#elif UNITY_STANDALONE_LINUX
+             Platform = "Linux";
+#elif UNITY_STANDALONE_WIN
+             Platform = "Win";
 #endif
             return Platform;
         }
@@ -449,7 +471,7 @@ public class HotUpdateManager
                 TextAsset text = ab.LoadAsset<TextAsset>(c_versionFileName);
                 dataJson = text.text;
                 ab.Unload(true);
-                Debug.Log("沙河路径版本："+dataJson);
+                Debug.Log("沙盒路径版本："+dataJson);
             }
             else
             {
@@ -461,9 +483,22 @@ public class HotUpdateManager
             }
             
         }
-
         return dataJson;
     }
+
+    public static string ReadLocalVersionContent()
+    {
+        string dataJson = "";
+        string persistentPath = PathTool.GetAssetsBundlePersistentPath() + c_versionFileName;
+
+        AssetBundle ab = AssetBundle.LoadFromFile(persistentPath);
+        TextAsset text = ab.LoadAsset<TextAsset>(c_versionFileName);
+        dataJson = text.text;
+        ab.Unload(true);
+        Debug.Log("沙盒路径版本：" + dataJson);
+        return dataJson;
+    }
+
 
     public struct DownLoadData
     {
